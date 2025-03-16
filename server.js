@@ -1,18 +1,22 @@
 import express from "express";
 import fs from "fs";
+import path from "path";
 import { createServer as createViteServer } from "vite";
 import "dotenv/config";
 
 const app = express();
-const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
+const __dirname = path.resolve();
 
-// Configure Vite middleware for React client
-const vite = await createViteServer({
-  server: { middlewareMode: true },
-  appType: "custom",
-});
-app.use(vite.middlewares);
+// Configure Vite middleware for React client (only in development)
+let vite;
+if (process.env.NODE_ENV !== "production") {
+  vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+  app.use(vite.middlewares);
+}
 
 // API route for token generation
 app.get("/token", async (req, res) => {
@@ -40,25 +44,14 @@ app.get("/token", async (req, res) => {
   }
 });
 
-// Render the React client
-app.use("*", async (req, res, next) => {
-  const url = req.originalUrl;
+// Serve React static files in production
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(path.join(__dirname, "dist/client")));
 
-  try {
-    const template = await vite.transformIndexHtml(
-      url,
-      fs.readFileSync("./client/index.html", "utf-8"),
-    );
-    const { render } = await vite.ssrLoadModule("./client/entry-server.jsx");
-    const appHtml = await render(url);
-    const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
-    res.status(200).set({ "Content-Type": "text/html" }).end(html);
-  } catch (e) {
-    vite.ssrFixStacktrace(e);
-    next(e);
-  }
-});
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "dist/client", "index.html"));
+  });
+}
 
-app.listen(port, () => {
-  console.log(`Express server running on *:${port}`);
-});
+// Export Express app as a serverless function (✅ Required for Vercel)
+export default app;
